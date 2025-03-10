@@ -1,68 +1,21 @@
 import os, sys
 from functools import cmp_to_key
 
-# This imports from a file that will be present in the
-# grading system. No need to alter for local testing -
-# if the file isn't present then these lines are skipped
 try:
     from compile_with_soln import grader_stub
-
     grader = grader_stub()
 except:
     pass
 
-N = 0  # number of points
-D = 0  # dimensionality of space
-K = 0  # number of nearest neighbors to find for each point
+N = 0
+D = 0
+K = 0
 
-
-# Note: K is always odd
-
-# ----------------------------------------
-# This function (which will be compiled with our code
-# when it is submitted to the grading system) takes
-# the index of a point (in 0..N-1) and returns either
-# +1 or -1 depending on its class.
-
-# grader.get_class(i)
-# ----------------------------------------
-
-# ----------------------------------------
-# This function (which will be compiled with our code
-# when it is submitted to the grading system) takes
-# the index i of a point (in 0..N-1) and the index of a
-# coordinate (in 0..D-1) and returns the jth coordinate
-# of the ith point.
-
-# grader.get_coord(i, j)
-# ----------------------------------------
-
-
-# For testing on your own system, you can call these functions.
-# They provide a simple 2D set of points, with x's being
-# class +1 and o's being class -1.
-#
-#    o    o
-# x   x
-#
-#    o    o
-# x   x
-#
-# The correct confusion matrix for this instance is:
-#
-# Predicted: +1  -1
-# Actual: +1  2   2
-#         -1  3   1
-#
-# Don't forget to switch your code back to calling
-# grader.get_class() and grader.get_coord() before
-# submitting.
 def get_class_local(index):
     if index < 0 or index >= 8:
         print('get_class_local: Invalid point index!')
         sys.exit(0)
     return 1 if index < 4 else -1
-
 
 def get_coord_local(i, j):
     pts = [[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0],
@@ -75,12 +28,67 @@ def get_coord_local(i, j):
         sys.exit(0)
     return pts[i][j]
 
+def getClass(index):
+    if 'grader' in globals() and hasattr(grader, 'get_class'):
+        return grader.get_class(index)
+    return get_class_local(index)
+
+def getCoord(i, j):
+    if 'grader' in globals() and hasattr(grader, 'get_coord'):
+        return grader.get_coord(i, j)
+    return get_coord_local(i, j)
+
+def distanceSquared(a, b):
+    s = 0
+    for i in range(len(a)):
+        diff = a[i] - b[i]
+        s += diff * diff
+    return s
+
+class KdNode:
+    def __init__(self, pointIndex, axis, left, right):
+        self.pointIndex = pointIndex
+        self.axis = axis
+        self.left = left
+        self.right = right
+
+def buildKdTree(indices, depth, pointsList):
+    if not indices:
+        return None
+    axis = depth % len(pointsList[0])
+    indices.sort(key=lambda i: pointsList[i][axis])
+    mid = len(indices) // 2
+    return KdNode(indices[mid], axis, buildKdTree(indices[:mid], depth+1, pointsList), buildKdTree(indices[mid+1:], depth+1, pointsList))
+
+def searchKdTree(node, query, k, excludeIndex, pointsList, neighbors):
+    if node is None:
+        return
+    idx = node.pointIndex
+    if idx != excludeIndex:
+        d = distanceSquared(query, pointsList[idx])
+        if len(neighbors) < k:
+            neighbors.append((d, idx))
+        else:
+            maxD = max(neighbors, key=lambda x: x[0])[0]
+            if d < maxD:
+                for j in range(len(neighbors)):
+                    if neighbors[j][0] == maxD:
+                        neighbors[j] = (d, idx)
+                        break
+    axis = node.axis
+    diff = query[axis] - pointsList[node.pointIndex][axis]
+    if diff <= 0:
+        near = node.left
+        far = node.right
+    else:
+        near = node.right
+        far = node.left
+    searchKdTree(near, query, k, excludeIndex, pointsList, neighbors)
+    if len(neighbors) < k or diff * diff < max(neighbors, key=lambda x: x[0])[0]:
+        searchKdTree(far, query, k, excludeIndex, pointsList, neighbors)
 
 def main():
     global N, D, K
-    # The values for N, D, and K are set in the grading system through
-    # environment variables, if present.  If not present, feel
-    # welcome to set N to any value you want for local testing.
     try:
         N = int(os.environ["N"])
         D = int(os.environ["D"])
@@ -89,19 +97,35 @@ def main():
         N = 8
         D = 2
         K = 3
-
-    # Below is the part of main() you should modify.
-    # (you are welcome to write other functions above
-    # and call them here, but all your code should be
-    # submitted in this one file).
-    # ----------------------------------------
-
-    # ----------------------------------------
-    # At the end, you should print out a 2 x 2 confusion
-    # matrix -- just 4 integers
-    print('2 2')
-    print('3 1')
-
+    points = []
+    for i in range(N):
+        pt = []
+        for j in range(D):
+            pt.append(getCoord(i, j))
+        points.append(pt)
+    kdTree = buildKdTree(list(range(N)), 0, points)
+    confMatrix = [[0, 0], [0, 0]]
+    for i in range(N):
+        query = points[i]
+        neighbors = []
+        searchKdTree(kdTree, query, K, i, points, neighbors)
+        vote = 0
+        for d, idx in neighbors:
+            vote += getClass(idx)
+        pred = 1 if vote > 0 else -1
+        actual = getClass(i)
+        if actual == 1:
+            if pred == 1:
+                confMatrix[0][0] += 1
+            else:
+                confMatrix[0][1] += 1
+        else:
+            if pred == 1:
+                confMatrix[1][0] += 1
+            else:
+                confMatrix[1][1] += 1
+    print(f"{confMatrix[0][0]} {confMatrix[0][1]}")
+    print(f"{confMatrix[1][0]} {confMatrix[1][1]}")
 
 if __name__ == "__main__":
     main()
